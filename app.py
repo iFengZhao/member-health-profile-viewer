@@ -653,7 +653,9 @@ def render_identity(member: pd.Series, anchored: bool = False) -> None:
 
 def render_observed_detail(member: pd.Series) -> None:
     """Second layer: full observed condition list on demand."""
-    with st.expander("Full condition list (date-ordered, most recent first)"):
+    with st.expander(
+        "Full condition list (date-ordered, most recent first)", expanded=True
+    ):
         items = split_items(member.get("date_ordered_condition_items"))
         if items:
             for recency, item in items:
@@ -668,7 +670,7 @@ def render_observed_detail(member: pd.Series) -> None:
 
 def render_claims_usage_detail(member: pd.Series) -> None:
     """Second layer: claims-usage detail behind an expander."""
-    with st.expander("Claims usage detail"):
+    with st.expander("Claims usage detail", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Distinct claim records", f"{as_int(member.get('unique_claim_records')):,}")
         c2.metric("Distinct claim dates", f"{as_int(member.get('unique_claim_dates')):,}")
@@ -693,7 +695,7 @@ def render_claims_usage_detail(member: pd.Series) -> None:
 
 def render_medication_detail(member: pd.Series) -> None:
     """Second layer: medication detail behind an expander."""
-    with st.expander("Medication detail"):
+    with st.expander("Medication detail", expanded=True):
         groups = split_groups(member.get("medication_groups_full")) or split_groups(member.get("medication_summary"))
         if groups:
             st.markdown("**Recorded medication groups:**")
@@ -720,7 +722,7 @@ def render_inferred_detail(member: pd.Series) -> None:
     if inferred is None or (isinstance(inferred, float) and pd.isna(inferred)):
         return
     labels = split_labels(member.get("top_inferred_labels"), load_label_vocabulary())
-    with st.expander("Inference validation context"):
+    with st.expander("Inference validation context", expanded=True):
         if labels:
             st.markdown(
                 f"**Inferred labels ({len(labels)} persisted, highest predicted "
@@ -759,23 +761,7 @@ def render_inferred_detail(member: pd.Series) -> None:
 
 
 def render_evidence_quality(member: pd.Series) -> None:
-    """Evidence-quality note (visible) plus provenance limitations (expander)."""
-    st.markdown("#### Evidence quality")
-    st.markdown(display_value(member.get("evidence_quality")))
-    st.markdown(
-        f"- **Claim time-limited records:** {as_int(member.get('claim_time_limited_records')):,} "
-        "(cannot support recency or time-based conclusions)."
-    )
-    st.markdown(
-        f"- **Prescription time-limited records:** {as_int(member.get('prescription_time_limited_records')):,} "
-        "(cannot support recency or time-based conclusions)."
-    )
-    unmapped = as_int(member.get("unmapped_items"))
-    if unmapped > 0:
-        st.markdown(
-            f"- **Unmapped diagnosis codes:** {unmapped:,} — kept as raw "
-            "evidence, never presented as a mapped or known disease."
-        )
+    """Evidence-quality and provenance notes behind a collapsed expander."""
     with st.expander("Evidence provenance and limitations"):
         st.markdown(
             "- Claim evidence shows **documented care**, not independently "
@@ -801,6 +787,22 @@ def render_evidence_quality(member: pd.Series) -> None:
             "- Inferred labels are presented only with validation-threshold "
             "and evaluation context and are never presented as claim-confirmed."
         )
+        st.markdown("**Evidence quality**")
+        st.markdown(display_value(member.get("evidence_quality")))
+        st.markdown(
+            f"**Claim time-limited records:** {as_int(member.get('claim_time_limited_records')):,} "
+            "(cannot support recency or time-based conclusions)."
+        )
+        st.markdown(
+            f"**Prescription time-limited records:** {as_int(member.get('prescription_time_limited_records')):,} "
+            "(cannot support recency or time-based conclusions)."
+        )
+        unmapped = as_int(member.get("unmapped_items"))
+        if unmapped > 0:
+            st.markdown(
+                f"**Unmapped diagnosis codes:** {unmapped:,} — kept as raw "
+                "evidence, never presented as a mapped or known disease."
+            )
 
 
 def render_member_status(member: pd.Series, anchored: bool = False) -> None:
