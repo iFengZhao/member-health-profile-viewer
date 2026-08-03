@@ -335,6 +335,21 @@ def as_int(value: object) -> int:
         return 0
 
 
+def member_picker_label(row: pd.Series) -> str:
+    """Dropdown label: member id, source coverage, and inference status.
+
+    `Not assessed` means the member is not in the inference cohort, never a
+    negative finding; an evaluated member shows its inferred-label count.
+    """
+    inferred = row.get("inferred_condition_count")
+    if inferred is None or (isinstance(inferred, float) and pd.isna(inferred)):
+        status = "Not assessed"
+    else:
+        count = int(inferred)
+        status = f"{count} inferred label" + ("" if count == 1 else "s")
+    return f"{row['member_id']} — {row['source_coverage']} · {status}"
+
+
 def split_items(text: object) -> list[tuple[str, str]] | None:
     """Parse a persisted "recency: item | recency: item" string into pairs."""
     if text is None or (isinstance(text, float) and pd.isna(text)):
@@ -849,11 +864,12 @@ def render_sidebar(sample: pd.DataFrame | None) -> None:
             matches = sample[id_hits | text_hits]
 
         anchored = anchored_member_id(sample)
-        anchored_label = f"{anchored} — {sample.loc[sample['member_id'] == anchored, 'source_coverage'].iloc[0]}"
+        anchored_label = member_picker_label(
+            sample.loc[sample["member_id"] == anchored].iloc[0]
+        )
         st.session_state.setdefault("sample_member", anchored_label)
         options = {
-            f"{row.member_id} — {row['source_coverage']}": row.member_id
-            for _, row in matches.iterrows()
+            member_picker_label(row): row.member_id for _, row in matches.iterrows()
         }
         if len(matches) == 0:
             st.info("No members match the search in the sample. Clear the search.")
@@ -910,7 +926,7 @@ def render_preset_view(full: pd.DataFrame, preset: dict) -> None:
         return
     top = matches.head(PRESET_TOP_N)
     st.dataframe(top[preset["columns"]], width="stretch", hide_index=True)
-    options = {f"{row.member_id} — {row['source_coverage']}": row.member_id for _, row in top.iterrows()}
+    options = {member_picker_label(row): row.member_id for _, row in top.iterrows()}
     choice = st.selectbox("Select a member from the preset matches", list(options), key="preset_member")
     member = full.loc[full["member_id"] == options[choice]].iloc[0]
     render_member_status(member)
