@@ -90,6 +90,7 @@ PRESETS = [
         "sort": "inferred_condition_count",
         "columns": ["member_id", "source_coverage", "inferred_condition_count", "review_signal"],
         "note": "DEC-008 fixed default for the review signal.",
+        "hint": "3+ inferred conditions above validation threshold — model-inferred, not claim-confirmed.",
     },
     {
         "name": "High claim volume",
@@ -98,6 +99,7 @@ PRESETS = [
         "sort": "unique_claim_records",
         "columns": ["member_id", "source_coverage", "unique_claim_records", "unique_claim_dates"],
         "note": "study.md flag example: 10 or more distinct claim records.",
+        "hint": "10+ distinct outpatient claim records — frequent documented care.",
     },
     {
         "name": "Polypharmacy",
@@ -106,6 +108,7 @@ PRESETS = [
         "sort": "distinct_classes",
         "columns": ["member_id", "source_coverage", "distinct_classes", "distinct_ndc", "prescription_fills"],
         "note": "Polypharmacy indicator from study.md (distinct NDC, category, group, class counts).",
+        "hint": "5+ distinct drug classes — many concurrent medications.",
     },
     {
         "name": "Stale prescriptions",
@@ -114,6 +117,7 @@ PRESETS = [
         "sort": "recency_days",
         "columns": ["member_id", "source_coverage", "recency_days", "observed_span_days", "prescription_fills"],
         "note": "DEC-009 `stale_prescription_recency`: recency p99 about 842 days; an inactive-medication review pattern.",
+        "hint": "Last prescription fill 842+ days before the cutoff — long prescription gap.",
     },
     {
         "name": "Many NDC, narrow categories",
@@ -122,6 +126,7 @@ PRESETS = [
         "sort": "distinct_ndc",
         "columns": ["member_id", "source_coverage", "distinct_ndc", "distinct_categories", "distinct_groups"],
         "note": "DEC-009 `many_ndc_narrow_categories`: usually an explainable single-therapy context note, not an anomaly.",
+        "hint": "Many distinct drugs but few categories — often explainable, worth a look.",
     },
     {
         "name": "Unmapped diagnosis codes",
@@ -130,6 +135,7 @@ PRESETS = [
         "sort": "unmapped_items",
         "columns": ["member_id", "source_coverage", "unmapped_items", "condition-like mapped_items"],
         "note": "Documentation-mismatch signal; unmapped codes are never presented as a known disease.",
+        "hint": "Diagnosis codes that did not map to the medical dictionary — never shown as a known disease.",
     },
 ]
 PRESET_BY_NAME = {preset["name"]: preset for preset in PRESETS}
@@ -880,12 +886,15 @@ def render_sidebar(sample: pd.DataFrame | None) -> None:
 
         st.markdown("**Presets (full population)**")
         st.caption(
-            "Click a preset to filter the full member table; **Clear preset** "
-            "below resets to the default member view."
+            "These filters flag recorded-care patterns that may indicate "
+            "unusual health care usage worth human review; they are filters, "
+            "not health judgments. Click a preset to filter the full member "
+            "table; **Clear preset** below resets to the default member view."
         )
         for preset in PRESETS:
             if st.button(preset["name"], key=f"preset_{preset['name']}"):
                 st.session_state["active_preset"] = preset["name"]
+            st.markdown(preset["hint"])
         active = st.session_state.get("active_preset")
         if active:
             if st.button("Clear preset"):
