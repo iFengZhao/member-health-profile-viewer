@@ -36,7 +36,12 @@ empirical results.
    `review_signal`; `member_profiles.csv` only persists the `Not assessed`
    placeholder. The join is one-to-one on `member_id` (unique on both sides,
    verified). Members without inference render `Not assessed` (not evaluated),
-   never a false negative.
+   never a false negative. `inferred_condition_count` counts condition
+   probabilities at or above their condition-specific validation cutoffs;
+   `top_inferred_labels` is a separate top-five probability ranking. The
+   persisted output does not identify which labels crossed their cutoffs, so
+   the viewer states that limitation rather than treating the top five as the
+   cutoff-crossing labels.
 4. **Sidebar is a control panel, not a text wall.** Long explanation text was
    moved into one "Language and evidence rules" expander. The sidebar now
    holds `Search members`, `Select a member to inspect` (over the sample), and
@@ -57,7 +62,8 @@ empirical results.
    picker and table; the sidebar shows the active preset and a `Clear preset`
    button to return to the default view.
 7. **Presets are grounded in the study contract.** High inferred burden
-   (DEC-008 trigger), high claim volume (study.md 10+ flag example),
+   (DEC-008 trigger: 3+ condition-level signals above their cutoffs), high
+   claim volume (study.md 10+ flag example),
    polypharmacy (study.md class-count indicator), stale prescriptions
    (DEC-009 p99 tail, 842 days), many-NDC-narrow-categories (DEC-009
    single-therapy context note, not an anomaly), and unmapped diagnosis codes
@@ -67,12 +73,13 @@ empirical results.
    full label names with "; ", and some CCS Level 2 names contain "; "
    themselves. The app parses against the persisted label vocabulary, longest
    match first; verified over the full cohort (every member parses to exactly
-   five labels).
+   five top-scored candidates). These candidates are ranking context, not a
+   list of labels known to be above cutoff.
 9. **Conservative language is taken verbatim from the artifacts.** Recency
-   labels, evidence provenance, and the prescription-inferred boundary are
-   rendered as persisted. The app never uses active / resolved / persistent
-   disease wording and never converts an absent field into a negative clinical
-   claim.
+   labels and evidence provenance are rendered as persisted. Prescription-based
+   model output is described as condition-level signals or top-scored
+   candidates, never as observed, diagnosed, active, resolved, or persistent
+   disease; an absent field is never converted into a negative clinical claim.
 10. **LLM summarization was considered and deliberately not adopted.** Faithful
    deterministic rendering of saved outputs; no hallucination or wording-drift
    risk, no API/network/per-page cost. If an AI reading aid is ever wanted, it
@@ -124,9 +131,10 @@ empirical results.
 2. **Unmapped evidence list.** Whether the profile output should persist the
    raw unmapped diagnosis codes as text so the app can show them (they are
    currently count-only).
-3. **Per-label detail.** Whether the application output should persist
-   per-label scores or more than the top five labels; today the count is over
-   the full 80-label vocabulary while only five labels are stored per member.
+3. **Per-condition detail.** Whether the application output should persist
+   member-specific condition probabilities and the identities of conditions
+   above cutoff. Today the count covers the full 80-condition vocabulary, but
+   only the five highest-probability candidates are stored per member.
 4. **Recalibration controls.** The burden trigger (3+), tier boundaries, and
    preset thresholds are fixed defaults; making them adjustable in the UI for
    review capacity is a small, clearly-labeled control change to add later.

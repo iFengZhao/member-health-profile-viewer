@@ -28,7 +28,7 @@ health status** (the worklist) is an additional surface.
   date-unavailable lines when present); source coverage follows as a small
   gray caption under the summary; the four compact status cards come next.
   Detailed health information (full date-ordered condition list, claims
-  usage, medication groups and aggregates, inference validation context,
+  usage, medication groups and aggregates, prescription-based inference context,
   evidence quality) is layer two behind expanders. Explanatory notes
   (claim-evidence definition, recency definitions, source-coverage meaning,
   read-only behavior, anchored-member rationale) sit at the bottom of the
@@ -40,8 +40,8 @@ health status** (the worklist) is an additional surface.
 - **Preset quick filters (full population)** — one click applies a filter and
   shows the qualifying members (top 200 by the preset's key field), from which
   a member can be selected for the status view:
-  - High inferred burden (`high inferred condition burden`, 3+ labels above
-    threshold; DEC-008 default)
+  - High inferred burden (`high inferred condition burden`, 3+ condition-level
+    signals above their condition-specific cutoffs; DEC-008 default)
   - High claim volume (`unique_claim_records > 10`; study.md flag example)
   - Polypharmacy (`distinct_classes >= 5`)
   - Stale prescriptions (`recency_days >= 842`; DEC-009 p99 tail)
@@ -59,8 +59,9 @@ health status** (the worklist) is an additional surface.
   persisted; no models are trained and no analysis is recomputed on page load;
   nothing is written by the app.
 - Conservative language only (ever / recently / historically recorded; date
-  unavailable or unreliable; outside profile cutoff). Inferred labels are
-  always described as prescription-inferred, never as observed or diagnosed;
+  unavailable or unreliable; outside profile cutoff). The app distinguishes
+  the number of condition probabilities above their cutoffs from the separate
+  top-five probability ranking. Neither is presented as observed or diagnosed;
   `Not assessed` (not in the inference cohort) is never a negative finding.
 
 ## Data inputs (read-only)
@@ -68,8 +69,8 @@ health status** (the worklist) is an additional surface.
 | Input | Role |
 |---|---|
 | `outputs/profile/member_profiles.csv` | Primary source: full member profile table (291,611 members, one row per member) |
-| `outputs/application/application_xgboost_inferred.csv` | Prescription-only inference results (49,610 members), left-joined by `member_id` |
-| `outputs/evaluation/xgboost_validation_thresholds.csv` | Per-label F1-max validation thresholds (reference context) |
+| `outputs/application/application_xgboost_inferred.csv` | Prescription-based inference results for the 49,610-member inference cohort, left-joined by `member_id` |
+| `outputs/evaluation/xgboost_validation_thresholds.csv` | Per-label probability cutoffs selected to maximize F1 on validation data (reference context) |
 | `outputs/evaluation/label_comparison.csv` | XGBoost-vs-logistic per-label comparison (reference context) |
 | `outputs/labels/ccs_level2_label_decisions.csv` | CCS Level 2 label decisions (135 candidates, 80 retained) |
 | `outputs/dataset/retained_label_names.csv` | Retained label names (80; label vocabulary for parsing) |
@@ -150,8 +151,10 @@ Both deployment paths keep the app read-only; neither writes to `outputs/` or
 - `recency_days` is null for members without a time-valid prescription fill
   (about a quarter of the table); the app renders it as "date unavailable or
   unreliable".
-- The application output persists the top five inferred labels per member;
-  labels below the top five and per-label scores are not stored.
+- The application output persists the five highest-probability condition
+  candidates per member. Member-specific probabilities and the identities of
+  the conditions above cutoff are not stored, so the viewer cannot identify
+  which conditions produced `inferred_condition_count`.
 - Preset thresholds are demonstration defaults grounded in DEC-008/DEC-009 and
   study.md; they stay adjustable without changing the underlying evidence.
 

@@ -12,10 +12,10 @@ search and picker run over a fixed, seeded 1,000-member sample of the full
 member profile table (outputs/profile/member_profiles.csv, 291,611 members).
 Preset quick filters (for example high inferred burden, high claim volume,
 stale prescriptions) search the full table and show qualifying members.
-Prescription-only inference
-(outputs/application/application_xgboost_inferred.csv, 49,610 members) is
-left-joined by member_id; members without inference show "Not assessed" (not
-evaluated), never a false negative.
+Prescription-based inference for the 49,610-member inference cohort
+(outputs/application/application_xgboost_inferred.csv) is left-joined by
+member_id; members without inference show "Not assessed" (not evaluated),
+never a false negative.
 For deployment, build_deploy_data.py writes compact parquet copies of these
 outputs into review_interface/data/; when a copy exists the app reads it
 instead, so the deployed bundle does not need the 169 MB CSV.
@@ -55,12 +55,18 @@ PRESET_TOP_N = 200
 
 # Review-signal semantics (DEC-008): `none` means evaluated and not triggered;
 # `Not assessed` means not yet evaluated (here: member not in the inference
-# cohort). The burden trigger is a fixed default (3+ inferred labels above
-# threshold) and may be recalibrated for review capacity without changing the
-# underlying evidence.
+# cohort). The burden trigger is a fixed default: 3+ condition-level signals,
+# where each signal means that a member-condition predicted probability is at
+# or above that condition's validation-selected cutoff. It may be recalibrated
+# for review capacity without changing the underlying evidence.
 BURDEN_SIGNAL = "high inferred condition burden"
 SIGNAL_OPTIONS = [BURDEN_SIGNAL, "none", "Not assessed"]
 BURDEN_TRIGGER_MIN_COUNT = 3
+SIGNAL_DISPLAY = {
+    BURDEN_SIGNAL: "High inferred condition burden (3+ signals)",
+    "none": "Below the study-default review trigger (3+ signals)",
+    "Not assessed": "Not assessed",
+}
 
 # Inferred-count tiers requested by study.md for the worklist.
 INFERRED_COUNT_TIERS = [
@@ -73,8 +79,8 @@ INFERRED_COUNT_TIERS = [
 ]
 
 SORT_OPTIONS = {
-    "Inferred condition count (high first)": ("inferred_condition_count", False),
-    "Inferred condition count (low first)": ("inferred_condition_count", True),
+    "Signals above cutoff (high first)": ("inferred_condition_count", False),
+    "Signals above cutoff (low first)": ("inferred_condition_count", True),
     "Member ID (A-Z)": ("member_id", True),
 }
 
@@ -85,12 +91,12 @@ SORT_OPTIONS = {
 PRESETS = [
     {
         "name": "High inferred burden",
-        "definition": f"`{BURDEN_SIGNAL}` ({BURDEN_TRIGGER_MIN_COUNT}+ inferred labels above threshold)",
+        "definition": f"`{BURDEN_SIGNAL}` ({BURDEN_TRIGGER_MIN_COUNT}+ condition-level signals)",
         "matches": lambda df: df["review_signal"].eq(BURDEN_SIGNAL),
         "sort": "inferred_condition_count",
         "columns": ["member_id", "source_coverage", "inferred_condition_count", "review_signal"],
         "note": "DEC-008 fixed default for the review signal.",
-        "hint": "3+ inferred conditions above validation threshold",
+        "hint": "3+ condition probabilities above their cutoffs",
     },
     {
         "name": "High claim volume",
@@ -331,6 +337,11 @@ def display_value(value: object) -> str:
     return text if text else "—"
 
 
+def review_signal_display(value: object) -> str:
+    """User-facing wording for the persisted review-signal value."""
+    return SIGNAL_DISPLAY.get(str(value), display_value(value))
+
+
 def as_int(value: object) -> int:
     """Return an int cell value, or 0 for missing/empty values."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -345,14 +356,15 @@ def member_picker_label(row: pd.Series) -> str:
     """Dropdown label: member id, source coverage, and inference status.
 
     `Not assessed` means the member is not in the inference cohort, never a
-    negative finding; an evaluated member shows its inferred-label count.
+    negative finding; an evaluated member shows how many condition
+    probabilities were at or above their condition-specific cutoffs.
     """
     inferred = row.get("inferred_condition_count")
     if inferred is None or (isinstance(inferred, float) and pd.isna(inferred)):
         status = "Not assessed"
     else:
         count = int(inferred)
-        status = f"{count} inferred label" + ("" if count == 1 else "s")
+        status = f"{count} signal" + ("" if count == 1 else "s") + " above cutoff"
     return f"{row['member_id']} — {row['source_coverage']} · {status}"
 
 
@@ -639,10 +651,10 @@ def render_concise_status(member: pd.Series) -> None:
     inferred = member.get("inferred_condition_count")
     assessed = inferred is not None and not (isinstance(inferred, float) and pd.isna(inferred))
     if assessed:
-        c4.metric("Inferred (prescription-only)", f"{int(inferred):,} labels")
-        c4.caption(f"Review signal: {display_value(member.get('review_signal'))}")
+        c4.metric("Prescription-based signals", f"{int(inferred):,} above cutoff")
+        c4.caption(f"Review tier: {review_signal_display(member.get('review_signal'))}")
     else:
-        c4.metric("Inferred (prescription-only)", "Not assessed")
+        c4.metric("Prescription-based signals", "Not assessed")
         c4.caption("Not in the inference cohort; not a negative finding")
 
 
@@ -728,24 +740,24 @@ def render_inferred_detail(member: pd.Series) -> None:
     if inferred is None or (isinstance(inferred, float) and pd.isna(inferred)):
         return
     labels = split_labels(member.get("top_inferred_labels"), load_label_vocabulary())
-    with st.expander("Inference validation context", expanded=True):
+    with st.expander("Prescription-based inference context", expanded=True):
         if labels:
             st.markdown(
-                f"**Inferred labels ({len(labels)} persisted, highest predicted "
-                "probability first):**"
+                f"**Top-scored condition candidates ({len(labels)} persisted, "
+                "highest predicted probability first):**"
             )
             for label in labels:
                 st.markdown(f"- {label}")
         st.markdown(
-            "- `inferred_condition_count` is the number of labels whose "
-            "predicted probability passed the per-label F1-max validation "
-            "threshold across the 80-label model vocabulary (fixed study "
-            "default per DEC-008); it is not limited to the labels shown here."
+            "- `inferred_condition_count` is the number of the 80 modeled "
+            "conditions for which this member's predicted probability was at "
+            "or above that condition's validation-selected cutoff. Each cutoff "
+            "was chosen on validation data to produce the highest F1."
         )
         st.markdown(
-            "- The application output persists the top five labels only, in "
-            "model-predicted order; labels below the top five and per-label "
-            "scores are not stored."
+            "- The count reflects condition-specific cutoffs across all 80 "
+            "modeled conditions. The list above separately shows the five "
+            "highest-probability candidates."
         )
         thresholds = load_validation_thresholds()
         comparison = load_label_comparison()
@@ -760,10 +772,21 @@ def render_inferred_detail(member: pd.Series) -> None:
             present = context[context["label"].isin(labels)]
             if not present.empty:
                 st.markdown(
-                    "Validation thresholds and test performance for this "
-                    "member's inferred labels (reference context, read-only):"
+                    "Validation-selected cutoffs and protected-test performance "
+                    "for the top-scored candidates (label-level reference "
+                    "context; not this member's probabilities):"
                 )
-                st.dataframe(present, width="stretch", hide_index=True)
+                st.dataframe(
+                    present,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "label": "Top-scored candidate",
+                        "xgboost_validation_threshold": "Validation-selected probability cutoff",
+                        "xgboost_ap": "Protected-test AP",
+                        "xgboost_f1": "Protected-test F1 at validation cutoff",
+                    },
+                )
 
 
 def render_evidence_quality(member: pd.Series) -> None:
@@ -790,8 +813,9 @@ def render_evidence_quality(member: pd.Series) -> None:
             "disease."
         )
         st.markdown(
-            "- Inferred labels are presented only with validation-threshold "
-            "and evaluation context and are never presented as claim-confirmed."
+            "- Prescription-based model outputs are shown with cutoff and "
+            "evaluation context. Neither top-scored candidates nor "
+            "condition-level signals are claim-confirmed diagnoses."
         )
         st.markdown("**Evidence quality**")
         st.markdown(display_value(member.get("evidence_quality")))
@@ -934,7 +958,18 @@ def render_preset_view(full: pd.DataFrame, preset: dict) -> None:
         st.info("No members qualify for this preset. Choose another preset or clear it.")
         return
     top = matches.head(PRESET_TOP_N)
-    st.dataframe(top[preset["columns"]], width="stretch", hide_index=True)
+    display_top = top[preset["columns"]].copy()
+    if "review_signal" in display_top:
+        display_top["review_signal"] = display_top["review_signal"].map(review_signal_display)
+    st.dataframe(
+        display_top,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "inferred_condition_count": "Condition signals above cutoff",
+            "review_signal": "Review tier",
+        },
+    )
     options = {member_picker_label(row): row.member_id for _, row in top.iterrows()}
     choice = st.selectbox("Select a member from the preset matches", list(options), key="preset_member")
     member = full.loc[full["member_id"] == options[choice]].iloc[0]
@@ -962,25 +997,26 @@ def render_worklist_tab(sample: pd.DataFrame) -> None:
     """Secondary surface: review worklist over the sampled members."""
     st.subheader("Review worklist")
     st.caption(
-        "Secondary surface: review of inferred health status over the "
+        "Secondary surface: review of prescription-based model output over the "
         "1,000-member sample. Members without inference show `Not assessed`."
     )
     c1, c2 = st.columns(2)
     member_query = c1.text_input("Member ID", placeholder="e.g. M0000001")
-    label_query = c2.text_input("Top inferred labels contain", placeholder="e.g. Diabetes")
+    label_query = c2.text_input("Top-scored candidates contain", placeholder="e.g. Diabetes")
     c3, c4 = st.columns(2)
     signals = c3.multiselect(
         "Review signal",
         SIGNAL_OPTIONS,
         default=list(SIGNAL_OPTIONS),
+        format_func=review_signal_display,
         help=(
-            "`none` = evaluated and not triggered. "
-            f"`{BURDEN_SIGNAL}` = {BURDEN_TRIGGER_MIN_COUNT} or more inferred labels "
-            "above threshold. `Not assessed` = not in the inference cohort."
+            f"`{BURDEN_SIGNAL}` = {BURDEN_TRIGGER_MIN_COUNT} or more "
+            "condition-level signals above their cutoffs. `none` = assessed "
+            "but below that member-level trigger. `Not assessed` = not in the inference cohort."
         ),
     )
     tiers = c4.multiselect(
-        "Inferred count tier",
+        "Condition-signal count tier",
         [tier[0] for tier in INFERRED_COUNT_TIERS] + ["Not assessed"],
         default=[tier[0] for tier in INFERRED_COUNT_TIERS] + ["Not assessed"],
     )
@@ -1017,9 +1053,9 @@ def render_worklist_tab(sample: pd.DataFrame) -> None:
     median = medians.median() if len(medians) else None
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Members shown", f"{shown:,}", f"of {len(sample):,} in the sample")
-    m2.metric("Burden signal (3+ labels)", f"{burden:,}")
-    m3.metric("With inferred labels", f"{assessed:,}")
-    m4.metric("Median inferred labels", f"{median:g}" if median is not None else "—")
+    m2.metric("Burden review tier (3+ signals)", f"{burden:,}")
+    m3.metric("With inference assessment", f"{assessed:,}")
+    m4.metric("Median signals above cutoff", f"{median:g}" if median is not None else "—")
 
     vocabulary = load_label_vocabulary()
     table = out[
@@ -1028,7 +1064,7 @@ def render_worklist_tab(sample: pd.DataFrame) -> None:
     table["inferred_condition_count"] = table["inferred_condition_count"].map(
         lambda v: "Not assessed" if pd.isna(v) else f"{int(v):,}"
     )
-    table["review_signal"] = table["review_signal"].fillna("Not assessed")
+    table["review_signal"] = table["review_signal"].fillna("Not assessed").map(review_signal_display)
     table["top_inferred_labels"] = table["top_inferred_labels"].map(
         lambda value: short_label_list(value, vocabulary)
     )
@@ -1038,11 +1074,19 @@ def render_worklist_tab(sample: pd.DataFrame) -> None:
         table = table.sort_values("_sort", ascending=ascending, na_position="last").drop(columns="_sort")
     else:
         table = table.sort_values(column, ascending=ascending)
+    table = table.rename(
+        columns={
+            "inferred_condition_count": "conditions_above_cutoff",
+            "review_signal": "review_tier",
+            "top_inferred_labels": "top_scored_candidates",
+        }
+    )
     st.dataframe(table, width="stretch", hide_index=True)
     st.caption(
-        "`inferred_condition_count` is the number of labels above threshold; "
-        "`top_inferred_labels` is the persisted top-five label list. Inferred "
-        "labels are prescription-inferred, not claim-confirmed."
+        "`conditions_above_cutoff` counts member-condition probabilities at or "
+        "above their condition-specific cutoffs. `top_scored_candidates` is a "
+        "separate top-five probability ranking; those candidates are not "
+        "necessarily above cutoff. The cutoff-crossing identities are not persisted."
     )
 
 
@@ -1067,15 +1111,15 @@ def render_reference_tab() -> None:
         retained = int(decisions["retained_for_modeling"].sum())
         st.markdown(
             f"**CCS Level 2 label decisions** — {len(decisions)} candidate "
-            f"labels, {retained} retained for prescription-only modeling:"
+            f"labels, {retained} retained for prescription-based condition inference:"
         )
         st.dataframe(decisions, width="stretch", hide_index=True)
 
     thresholds = load_validation_thresholds()
     if thresholds is not None:
         st.markdown(
-            f"**XGBoost validation thresholds** ({len(thresholds)} labels, "
-            "F1-max operating points per DEC-008):"
+            f"**XGBoost validation-selected probability cutoffs** ({len(thresholds)} "
+            "labels; each cutoff maximizes F1 on validation data, per DEC-008):"
         )
         st.dataframe(thresholds, width="stretch", hide_index=True)
 
